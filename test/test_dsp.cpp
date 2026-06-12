@@ -240,22 +240,30 @@ static void test_stability_under_brutal_jumps() {
 }
 
 static void test_color_zero_is_bit_exact_bypass() {
-    // A: color stays 0. B: color goes to 0.5 then back to 0 over silence.
-    // After B's smoother snaps, both must produce IDENTICAL output bits.
+    // A: color stays 0 forever. B: color active on REAL SIGNAL (builds up
+    // non-zero ColorState), then back to 0. After B's smoother snaps, both
+    // must produce IDENTICAL output bits — proving the stage is truly skipped
+    // (a broken bypass would run B's stale DC blocker and diverge).
     bigknob::BigKnobDsp a, b;
     a.init(kSr); b.init(kSr);
     auto p = butterworthParams(1000.0f, false);
     a.setParams(p); a.reset();
     auto pb = p; pb.color = 0.5f;
     b.setParams(pb); b.reset();
-    std::vector<float> z(48000, 0.0f), o1(48000), o2(48000);
-    b.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // 1 s color up
+
+    const int n1 = 48000;
+    std::vector<float> sig(n1), t1(n1), t2(n1);
+    double phase = 0.0; const double w = 2.0 * kPiD * 220.0 / kSr;
+    for (int i = 0; i < n1; ++i) { sig[i] = 0.8f * float(std::sin(phase)); phase += w; }
+
+    b.process(sig.data(), sig.data(), t1.data(), t2.data(), n1);  // color UP on signal
     pb.color = 0.0f; b.setParams(pb);
-    b.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // 1 s settle+snap
-    a.process(z.data(), z.data(), o1.data(), o2.data(), 48000);
-    a.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // keep histories equal (silence)
+    b.process(sig.data(), sig.data(), t1.data(), t2.data(), n1);  // fade out + snap, still on signal
+    a.process(sig.data(), sig.data(), t1.data(), t2.data(), n1);  // same signal history for A
+    a.process(sig.data(), sig.data(), t1.data(), t2.data(), n1);
     assert(!b.colorActive());
-    // identical noise through both
+
+    // identical noise through both — must match bit-for-bit
     uint32_t lcg = 7;
     std::vector<float> in(4800), aL(4800), aR(4800), bL(4800), bR(4800);
     for (int i = 0; i < 4800; ++i) {

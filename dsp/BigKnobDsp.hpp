@@ -69,6 +69,9 @@ public:
         updateCoeffs();
     }
 
+    // NOT thread-safe vs process(): plain struct copy, no atomics. Call from
+    // the audio thread only (DPF delivers setParameterValue() there), or
+    // ensure external synchronization.
     void setParams(const BigKnobParams& p) noexcept { p_ = p; }
 
     void process(const float* inL, const float* inR,
@@ -107,8 +110,11 @@ private:
         gainS_ += aSlow_ * (dbToLin(p_.gainDb) - gainS_);
         modeS_ += aMode_ * ((p_.lp ? 1.0f : 0.0f) - modeS_);
         colorS_ += aSlow_ * (p_.color - colorS_);
-        if (p_.color <= 0.0f && colorS_ < 1e-4f)
+        if (p_.color <= 0.0f && colorS_ < 1e-4f && colorS_ != 0.0f) {
             colorS_ = 0.0f;                       // snap to true bypass
+            colorSt_[0].reset();                  // drop stale DC-blocker state so
+            colorSt_[1].reset();                  // reactivation starts clean
+        }
         updateCoeffs();
         healStates();
     }
