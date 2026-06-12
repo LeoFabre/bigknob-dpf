@@ -151,6 +151,149 @@ static void test_reso_to_q_range() {
     assert(resoToQ(0.5f) > resoToQ(0.25f));        // monotonic
 }
 
+#include <vector>
+#include <cstring>
+
+// Buffer-based |H(f)| probe for the full BigKnobDsp (block API).
+static double dspMagAt(bigknob::BigKnobDsp& dsp, double f) {
+    const int settle = int(kSr * 0.1), measure = int(kSr * 0.2);
+    std::vector<float> in(settle + measure), oL(settle + measure), oR(settle + measure);
+    double phase = 0.0; const double w = 2.0 * kPiD * f / kSr;
+    for (int i = 0; i < settle + measure; ++i) { in[i] = float(std::sin(phase)); phase += w; }
+    dsp.process(in.data(), in.data(), oL.data(), oR.data(), uint32_t(in.size()));
+    double acc = 0.0;
+    for (int i = settle; i < settle + measure; ++i) acc += double(oL[i]) * oL[i];
+    return std::sqrt(acc / measure) * std::sqrt(2.0);
+}
+
+// reso 0.25 -> Q = 1.0: SVF(Q=1) x one-pole = exact 3rd-order Butterworth.
+static bigknob::BigKnobParams butterworthParams(float fc, bool lpMode) {
+    bigknob::BigKnobParams p;
+    p.lp = lpMode; p.freqHz = fc; p.step = false;
+    p.reso = 0.25f; p.impedance = false; p.color = 0.0f; p.gainDb = 0.0f;
+    return p;
+}
+
+static void test_chain_hp_18db_per_oct() {
+    bigknob::BigKnobDsp dsp;
+    dsp.init(kSr);
+    dsp.setParams(butterworthParams(1000.0f, false));
+    dsp.reset();
+    const double m250 = dspMagAt(dsp, 250.0);
+    dsp.reset();
+    const double m125 = dspMagAt(dsp, 125.0);
+    const double slope = db(m250) - db(m125);
+    assert(slope > 16.5 && slope < 19.5);              // 3 poles: ~18 dB/oct
+    dsp.reset();
+    assert(std::fabs(db(dspMagAt(dsp, 8000.0))) < 1.0); // passband flat
+}
+
+static void test_chain_lp_mirror_18db_per_oct() {
+    bigknob::BigKnobDsp dsp;
+    dsp.init(kSr);
+    dsp.setParams(butterworthParams(500.0f, true));
+    dsp.reset();
+    const double m2k = dspMagAt(dsp, 2000.0);
+    dsp.reset();
+    const double m4k = dspMagAt(dsp, 4000.0);
+    const double slope = db(m2k) - db(m4k);
+    assert(slope > 17.0 && slope < 20.5);              // warp inflates slightly
+    dsp.reset();
+    assert(std::fabs(db(dspMagAt(dsp, 50.0))) < 1.0);
+}
+
+static void test_step_mode_quantizes_the_cutoff() {
+    // freqHz=80 in Step mode must behave as fc=70: compare against a Free-mode
+    // instance pinned at exactly 70 Hz.
+    bigknob::BigKnobDsp stepped, pinned;
+    stepped.init(kSr); pinned.init(kSr);
+    auto p = butterworthParams(80.0f, false);
+    p.step = true;  stepped.setParams(p); stepped.reset();
+    auto q = butterworthParams(70.0f, false);
+    pinned.setParams(q); pinned.reset();
+    const double a = dspMagAt(stepped, 35.0);
+    const double b = dspMagAt(pinned, 35.0);
+    assert(std::fabs(db(a) - db(b)) < 0.1);
+}
+
+static void test_stability_under_brutal_jumps() {
+    // Max reso, impedance + color on, cutoff slammed 40<->10000 every 64 samples.
+    bigknob::BigKnobDsp dsp;
+    dsp.init(kSr);
+    bigknob::BigKnobParams p;
+    p.step = false; p.reso = 1.0f; p.impedance = true; p.color = 1.0f;
+    uint32_t lcg = 1;
+    std::vector<float> in(64), oL(64), oR(64);
+    for (int blk = 0; blk < 1500; ++blk) {           // 2 s total
+        p.freqHz = (blk % 2) ? 10000.0f : 40.0f;
+        dsp.setParams(p);
+        for (int i = 0; i < 64; ++i) {
+            lcg = lcg * 1664525u + 1013904223u;       // deterministic noise
+            in[i] = (float(lcg >> 8) / 8388608.0f) - 1.0f;
+        }
+        dsp.process(in.data(), in.data(), oL.data(), oR.data(), 64);
+        for (int i = 0; i < 64; ++i) {
+            assert(std::isfinite(oL[i]) && std::isfinite(oR[i]));
+            assert(std::fabs(oL[i]) < 20.0f);
+        }
+    }
+}
+
+static void test_color_zero_is_bit_exact_bypass() {
+    // A: color stays 0. B: color goes to 0.5 then back to 0 over silence.
+    // After B's smoother snaps, both must produce IDENTICAL output bits.
+    bigknob::BigKnobDsp a, b;
+    a.init(kSr); b.init(kSr);
+    auto p = butterworthParams(1000.0f, false);
+    a.setParams(p); a.reset();
+    auto pb = p; pb.color = 0.5f;
+    b.setParams(pb); b.reset();
+    std::vector<float> z(48000, 0.0f), o1(48000), o2(48000);
+    b.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // 1 s color up
+    pb.color = 0.0f; b.setParams(pb);
+    b.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // 1 s settle+snap
+    a.process(z.data(), z.data(), o1.data(), o2.data(), 48000);
+    a.process(z.data(), z.data(), o1.data(), o2.data(), 48000);  // keep histories equal (silence)
+    assert(!b.colorActive());
+    // identical noise through both
+    uint32_t lcg = 7;
+    std::vector<float> in(4800), aL(4800), aR(4800), bL(4800), bR(4800);
+    for (int i = 0; i < 4800; ++i) {
+        lcg = lcg * 1664525u + 1013904223u;
+        in[i] = (float(lcg >> 8) / 8388608.0f) - 1.0f;
+    }
+    a.process(in.data(), in.data(), aL.data(), aR.data(), 4800);
+    b.process(in.data(), in.data(), bL.data(), bR.data(), 4800);
+    assert(std::memcmp(aL.data(), bL.data(), 4800 * sizeof(float)) == 0);
+}
+
+static void test_nan_input_self_heals() {
+    bigknob::BigKnobDsp dsp;
+    dsp.init(kSr);
+    dsp.setParams(butterworthParams(1000.0f, false));
+    dsp.reset();
+    std::vector<float> in(256, 0.5f), oL(256), oR(256);
+    in[0] = std::nanf("");
+    dsp.process(in.data(), in.data(), oL.data(), oR.data(), 256);
+    // next buffer must be fully finite (states healed at slice boundaries)
+    std::fill(in.begin(), in.end(), 0.5f);
+    dsp.process(in.data(), in.data(), oL.data(), oR.data(), 256);
+    for (int i = 0; i < 256; ++i) assert(std::isfinite(oL[i]));
+}
+
+static void test_impedance_level_side_effect() {
+    // At reso=0, Impedance mode loses ~1.5 dB vs Clean (damped passive network).
+    bigknob::BigKnobDsp clean, imp;
+    clean.init(kSr); imp.init(kSr);
+    auto p = butterworthParams(100.0f, false);
+    p.reso = 0.0f;
+    clean.setParams(p); clean.reset();
+    auto pi = p; pi.impedance = true;
+    imp.setParams(pi); imp.reset();
+    const double diff = db(dspMagAt(clean, 5000.0)) - db(dspMagAt(imp, 5000.0));
+    assert(diff > 1.0 && diff < 2.0);
+}
+
 int main() {
     test_svf_hp_slope_12db();
     test_svf_lp_slope_12db();
@@ -164,6 +307,13 @@ int main() {
     test_step_table_is_the_altec_9069b();
     test_quantize_lands_on_steps();
     test_reso_to_q_range();
+    test_chain_hp_18db_per_oct();
+    test_chain_lp_mirror_18db_per_oct();
+    test_step_mode_quantizes_the_cutoff();
+    test_stability_under_brutal_jumps();
+    test_color_zero_is_bit_exact_bypass();
+    test_nan_input_self_heals();
+    test_impedance_level_side_effect();
     std::printf("ALL DSP TESTS PASSED\n");
     return 0;
 }
