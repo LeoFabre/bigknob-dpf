@@ -1,0 +1,20 @@
+#pragma once
+
+#define DISTRHO_PLUGIN_BRAND "Dubplex"
+#define DISTRHO_PLUGIN_NAME  "BigKnob"
+#define DISTRHO_PLUGIN_URI   "https://github.com/LeoFabre/bigknob-dpf"
+
+#ifndef DISTRHO_PLUGIN_HAS_UI
+#define DISTRHO_PLUGIN_HAS_UI 0
+#endif
+#define DISTRHO_UI_USE_NANOVG        1
+#define DISTRHO_PLUGIN_IS_RT_SAFE    1
+#define DISTRHO_PLUGIN_NUM_INPUTS    2
+#define DISTRHO_PLUGIN_NUM_OUTPUTS   2
+#define DISTRHO_PLUGIN_WANT_PROGRAMS 0
+#define DISTRHO_PLUGIN_WANT_STATE    0
+
+#define DISTRHO_UI_DEFAULT_WIDTH     460
+#define DISTRHO_UI_DEFAULT_HEIGHT    240
+
+#define DISTRHO_PLUGIN_VST3_CATEGORIES "Fx|Filter"
