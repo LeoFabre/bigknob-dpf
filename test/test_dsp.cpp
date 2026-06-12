@@ -1,6 +1,7 @@
 // BigKnob DSP tests — standalone, no DPF required.
 // Build: clang++ -std=c++17 -O2 -I../dsp test_dsp.cpp -o /tmp/test_bigknob && /tmp/test_bigknob
 #include "Svf.hpp"
+#include "Color.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -87,12 +88,56 @@ static void test_svf_state_finite_guard() {
     assert(s.finite());
 }
 
+static void test_color_silence_in_silence_out() {
+    ColorCoeffs c; c.set(1.0f, 2.0f, float(kSr));
+    ColorState s;
+    for (int i = 0; i < 1000; ++i)
+        assert(s.process(0.0f, c) == 0.0f);   // bias trick: zero in -> zero out, exactly
+}
+
+static void test_color_small_signal_gain() {
+    // Small-signal gain ~= pre * post * (1 - bias^2)  (cubic'(bias) = 1 - bias^2)
+    ColorCoeffs c; c.set(0.5f, 1.0f, float(kSr));
+    ColorState s;
+    auto proc = [&](float in) { return s.process(in, c); };
+    const double expected = double(c.pre) * c.post * (1.0 - double(c.bias) * c.bias);
+    const double measured = magAt(proc, 1000.0, 0.001);  // tiny amplitude: linear region
+    assert(std::fabs(measured - expected) / expected < 0.05);
+}
+
+static void test_color_bounded_output() {
+    ColorCoeffs c; c.set(1.0f, 2.0f, float(kSr));
+    ColorState s;
+    for (int i = 0; i < 4800; ++i) {
+        const float wild = (i % 2 ? 10.0f : -10.0f);
+        const float y = s.process(wild, c);
+        assert(std::isfinite(y) && std::fabs(y) < 1.5f);
+    }
+}
+
+static void test_color_no_dc_after_settle() {
+    // Heavily asymmetric drive on a sine generates DC -> the blocker must kill it.
+    ColorCoeffs c; c.set(1.0f, 2.0f, float(kSr));
+    ColorState s;
+    double phase = 0.0, w = 2.0 * kPiD * 100.0 / kSr;
+    for (int i = 0; i < 48000; ++i) { (void) s.process(float(std::sin(phase)), c); phase += w; }
+    double mean = 0.0;
+    const int n = 9600;  // 20 full cycles of 100 Hz
+    for (int i = 0; i < n; ++i) { mean += s.process(float(std::sin(phase)), c); phase += w; }
+    mean /= n;
+    assert(std::fabs(mean) < 0.005);
+}
+
 int main() {
     test_svf_hp_slope_12db();
     test_svf_lp_slope_12db();
     test_onepole_slope_6db();
     test_svf_resonance_peaks();
     test_svf_state_finite_guard();
+    test_color_silence_in_silence_out();
+    test_color_small_signal_gain();
+    test_color_bounded_output();
+    test_color_no_dc_after_settle();
     std::printf("ALL DSP TESTS PASSED\n");
     return 0;
 }
