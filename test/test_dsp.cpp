@@ -8,6 +8,7 @@
 using namespace bigknob;
 
 static constexpr double kSr = 48000.0;
+static constexpr double kPiD = 3.14159265358979323846;
 
 // Steady-state magnitude |H(f)| of any mono sample-processor lambda.
 // Feeds a unit sine, discards 0.1 s, measures RMS over 0.2 s.
@@ -15,7 +16,7 @@ template <typename Proc>
 static double magAt(Proc&& proc, double f, double amp = 1.0) {
     const int settle = int(kSr * 0.1), measure = int(kSr * 0.2);
     double phase = 0.0;
-    const double w = 2.0 * M_PI * f / kSr;
+    const double w = 2.0 * kPiD * f / kSr;
     for (int i = 0; i < settle; ++i) { (void) proc(float(amp * std::sin(phase))); phase += w; }
     double acc = 0.0;
     for (int i = 0; i < measure; ++i) {
@@ -31,6 +32,7 @@ static void test_svf_hp_slope_12db() {
     SvfCoeffs c; c.set(1000.0f, 0.7071f, float(kSr));
     SvfState s;
     auto hpProc = [&](float in) { float hp, lp; s.process(in, c, hp, lp); return hp; };
+    s.reset();
     const double m250 = magAt(hpProc, 250.0);
     s.reset();
     const double m125 = magAt(hpProc, 125.0);
@@ -44,11 +46,12 @@ static void test_svf_lp_slope_12db() {
     SvfCoeffs c; c.set(500.0f, 0.7071f, float(kSr));
     SvfState s;
     auto lpProc = [&](float in) { float hp, lp; s.process(in, c, hp, lp); return lp; };
+    s.reset();
     const double m2k = magAt(lpProc, 2000.0);
     s.reset();
     const double m4k = magAt(lpProc, 4000.0);
     const double slope = db(m2k) - db(m4k);
-    assert(slope > 10.5 && slope < 14.5);              // bilinear warp inflates a bit
+    assert(slope > 10.5 && slope < 13.5);              // 2-pole: ~12 dB/oct
     s.reset();
     assert(std::fabs(db(magAt(lpProc, 50.0))) < 1.0);
 }
@@ -57,6 +60,7 @@ static void test_onepole_slope_6db() {
     OnePoleCoeffs c; c.set(1000.0f, float(kSr));
     OnePoleState s;
     auto hpProc = [&](float in) { return s.hp(in, c); };
+    s.reset();
     const double m250 = magAt(hpProc, 250.0);
     s.reset();
     const double m125 = magAt(hpProc, 125.0);
@@ -69,7 +73,8 @@ static void test_svf_resonance_peaks() {
     SvfCoeffs c; c.set(1000.0f, 8.0f, float(kSr));
     SvfState s;
     auto hpProc = [&](float in) { float hp, lp; s.process(in, c, hp, lp); return hp; };
-    assert(db(magAt(hpProc, 1000.0)) > 12.0);          // Q=8 -> ~+18 dB peak
+    s.reset();
+    assert(db(magAt(hpProc, 1000.0)) > 16.0);          // Q=8 -> ~+18 dB peak at fc
 }
 
 static void test_svf_state_finite_guard() {
