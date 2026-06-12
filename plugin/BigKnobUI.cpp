@@ -72,7 +72,9 @@ protected:
                     const uint32_t p = kSwitchParam[i];
                     const float v = fValues[p] > 0.5f ? 0.0f : 1.0f;
                     fValues[p] = v;
+                    editParameter(p, true);
                     setParameterValue(p, v);
+                    editParameter(p, false);
                     repaint();
                     return true;
                 }
@@ -82,10 +84,12 @@ protected:
                     fDragKnob  = i;
                     fDragY     = float(ev.pos.getY());
                     fDragStart = toNorm(kKnobParam[i], fValues[kKnobParam[i]]);
+                    editParameter(kKnobParam[i], true);
                     return true;
                 }
             }
         } else if (fDragKnob >= 0) {
+            editParameter(kKnobParam[fDragKnob], false);
             fDragKnob = -1;
             return true;
         }
