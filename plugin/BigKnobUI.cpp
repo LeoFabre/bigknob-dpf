@@ -65,33 +65,35 @@ protected:
     }
 
     bool onMouse(const MouseEvent& ev) override {
+        if (!ev.press) {                      // any release closes an open drag
+            if (fDragKnob >= 0) {
+                editParameter(kKnobParam[fDragKnob], false);
+                fDragKnob = -1;
+                return true;
+            }
+            return false;
+        }
         if (ev.button != 1) return false;
-        if (ev.press) {
-            for (int i = 0; i < 3; ++i) {
-                if (hitSwitch(i, float(ev.pos.getX()), float(ev.pos.getY()))) {
-                    const uint32_t p = kSwitchParam[i];
-                    const float v = fValues[p] > 0.5f ? 0.0f : 1.0f;
-                    fValues[p] = v;
-                    editParameter(p, true);
-                    setParameterValue(p, v);
-                    editParameter(p, false);
-                    repaint();
-                    return true;
-                }
+        for (int i = 0; i < 3; ++i) {
+            if (hitSwitch(i, float(ev.pos.getX()), float(ev.pos.getY()))) {
+                const uint32_t p = kSwitchParam[i];
+                const float v = fValues[p] > 0.5f ? 0.0f : 1.0f;
+                fValues[p] = v;
+                editParameter(p, true);
+                setParameterValue(p, v);
+                editParameter(p, false);
+                repaint();
+                return true;
             }
-            for (int i = 0; i < 4; ++i) {
-                if (hitKnob(i, float(ev.pos.getX()), float(ev.pos.getY()))) {
-                    fDragKnob  = i;
-                    fDragY     = float(ev.pos.getY());
-                    fDragStart = toNorm(kKnobParam[i], fValues[kKnobParam[i]]);
-                    editParameter(kKnobParam[i], true);
-                    return true;
-                }
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (hitKnob(i, float(ev.pos.getX()), float(ev.pos.getY()))) {
+                fDragKnob  = i;
+                fDragY     = float(ev.pos.getY());
+                fDragStart = toNorm(kKnobParam[i], fValues[kKnobParam[i]]);
+                editParameter(kKnobParam[i], true);
+                return true;
             }
-        } else if (fDragKnob >= 0) {
-            editParameter(kKnobParam[fDragKnob], false);
-            fDragKnob = -1;
-            return true;
         }
         return false;
     }

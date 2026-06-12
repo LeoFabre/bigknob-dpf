@@ -6,6 +6,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 using namespace bigknob;
 
@@ -150,9 +152,6 @@ static void test_reso_to_q_range() {
     assert(std::fabs(resoToQ(1.0f) - 8.0f) < 1e-3f);
     assert(resoToQ(0.5f) > resoToQ(0.25f));        // monotonic
 }
-
-#include <vector>
-#include <cstring>
 
 // Buffer-based |H(f)| probe for the full BigKnobDsp (block API).
 static double dspMagAt(bigknob::BigKnobDsp& dsp, double f) {
