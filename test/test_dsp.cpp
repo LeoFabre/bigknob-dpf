@@ -2,6 +2,7 @@
 // Build: clang++ -std=c++17 -O2 -I../dsp test_dsp.cpp -o /tmp/test_bigknob && /tmp/test_bigknob
 #include "Svf.hpp"
 #include "Color.hpp"
+#include "BigKnobDsp.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -128,6 +129,28 @@ static void test_color_no_dc_after_settle() {
     assert(std::fabs(mean) < 0.005);
 }
 
+static void test_step_table_is_the_altec_9069b() {
+    static const float altec[10] = {70,100,150,250,500,1000,2000,3000,5000,7500};
+    static_assert(kNumSteps == 10, "9069B has 10 positions");
+    for (int i = 0; i < 10; ++i) assert(kStepFreqs[i] == altec[i]);
+}
+
+static void test_quantize_lands_on_steps() {
+    for (int i = 0; i < kNumSteps; ++i)
+        assert(quantizeToStep(kStepFreqs[i]) == kStepFreqs[i]);   // fixed points
+    // Nearest in LOG domain: log-midpoint of 70..100 is sqrt(7000) ~= 83.67
+    assert(quantizeToStep(80.0f)  == 70.0f);
+    assert(quantizeToStep(90.0f)  == 100.0f);
+    assert(quantizeToStep(40.0f)  == 70.0f);      // below range clamps to first
+    assert(quantizeToStep(10000.0f) == 7500.0f);  // above range clamps to last
+}
+
+static void test_reso_to_q_range() {
+    assert(std::fabs(resoToQ(0.0f) - 0.5f) < 1e-4f);
+    assert(std::fabs(resoToQ(1.0f) - 8.0f) < 1e-3f);
+    assert(resoToQ(0.5f) > resoToQ(0.25f));        // monotonic
+}
+
 int main() {
     test_svf_hp_slope_12db();
     test_svf_lp_slope_12db();
@@ -138,6 +161,9 @@ int main() {
     test_color_small_signal_gain();
     test_color_bounded_output();
     test_color_no_dc_after_settle();
+    test_step_table_is_the_altec_9069b();
+    test_quantize_lands_on_steps();
+    test_reso_to_q_range();
     std::printf("ALL DSP TESTS PASSED\n");
     return 0;
 }
