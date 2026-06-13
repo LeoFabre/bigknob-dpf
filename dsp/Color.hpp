@@ -9,6 +9,14 @@
 
 namespace bigknob {
 
+// Odd soft clip: ~linear small-signal, saturates to ±2/3. Branchless — clamping
+// x into [-1,1] then applying the polynomial is bit-identical to the branched
+// form (the poly evaluates to ±2/3 at ±1), and lowers to fminnm/fmaxnm.
+inline float colorCubic(float x) noexcept {
+    const float xc = std::fmax(-1.0f, std::fmin(1.0f, x));
+    return xc - xc * xc * xc * (1.0f / 3.0f);
+}
+
 struct ColorCoeffs {
     float pre = 1.0f, post = 1.0f, bias = 0.0f;
     float dcR = 0.9995f;
@@ -29,16 +37,15 @@ struct ColorState {
     void reset() noexcept { dcX = dcY = 0.0f; }
     bool finite() const noexcept { return std::isfinite(dcX) && std::isfinite(dcY); }
 
-    // Odd soft clip: ~linear small-signal, saturates to ±2/3.
-    static inline float cubic(float x) noexcept {
-        if (x >  1.0f) return  2.0f / 3.0f;
-        if (x < -1.0f) return -2.0f / 3.0f;
-        return x - x * x * x * (1.0f / 3.0f);
-    }
+    // Kept for the unit tests' isolated-clipper checks.
+    static inline float cubic(float x) noexcept { return colorCubic(x); }
 
     inline float process(float in, const ColorCoeffs& c) noexcept {
         // Bias trick: asymmetry (even harmonics) without static DC at rest.
-        const float shaped = cubic(in * c.pre + c.bias) - cubic(c.bias);
+        // BOTH cubics must stay in this function so the compiler emits identical
+        // code for them — that's what makes silence-in/silence-out exact even
+        // under the DSP TU's -funsafe-math-optimizations.
+        const float shaped = colorCubic(in * c.pre + c.bias) - colorCubic(c.bias);
         const float y = shaped - dcX + c.dcR * dcY;   // DC blocker
         dcX = shaped;
         dcY = y;
